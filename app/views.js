@@ -22,6 +22,30 @@ const NAV = [
   ['#/report', 'Laporan'],
 ];
 
+function incomeSection(state) {
+  const sorted = [...state.income].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  const rows = sorted.map((line) => `<tr>
+    <td>${formatDate(line.date)}</td>
+    <td>${escapeHtml(line.source)}</td>
+    <td class="amount">${formatRupiah(line.amount)}</td>
+    <td><button class="btn-small danger-outline" data-action="delete-income" data-id="${line.id}" aria-label="Hapus ${escapeHtml(line.source)}">Hapus</button></td>
+  </tr>`).join('');
+  return `<section class="card" aria-label="Pemasukan bulan ini">
+    <h2>Pemasukan — ${MONTH_LABEL} <span class="total-pill">Total ${formatRupiah(totalIncome(state))}</span></h2>
+    <p class="hint">Uang masuk bulan ini dari semua sumber. Tambah pemasukan baru di bawah — total pemasukan di dasbor, laporan, dan tren langsung mengikuti.</p>
+    <div class="table-scroll"><table class="table"><thead><tr><th>Tanggal</th><th>Sumber</th><th>Jumlah</th><th></th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="4">Belum ada pemasukan yang dicatat.</td></tr>'}</tbody></table></div>
+    <h2 class="sub">Tambah Pemasukan</h2>
+    <form id="add-income" class="form-grid">
+      <label>Sumber pemasukan <input name="source" required maxlength="60" placeholder="cth. Gaji, katering, freelance"></label>
+      <label>Tanggal <input name="date" type="date" value="2026-11-26" required></label>
+      <label>Jumlah (Rp) <input name="amount" type="number" min="1000" step="500" required placeholder="500000"></label>
+      <button class="btn primary" type="submit">+ Tambah Pemasukan</button>
+    </form>
+    <p class="hint" id="income-status" role="status"></p>
+  </section>`;
+}
+
 function projectionPanel(state) {
   const rows = projectMonthEnd(state);
   const pace = dailyPaceByCategory(state);
@@ -64,7 +88,7 @@ function statCards(state) {
   const left = remaining(state);
   const rate = savingsRate(state);
   return `<section class="stats" aria-label="Ringkasan bulan ini">
-    <div class="stat"><span class="stat-label">Pemasukan</span><strong class="stat-value">${formatRupiah(income)}</strong><span class="stat-note">Gaji Rp 7 jt + katering Rp 1,5 jt</span></div>
+    <div class="stat"><span class="stat-label">Pemasukan</span><strong class="stat-value">${formatRupiah(income)}</strong><span class="stat-note">${state.income.length} sumber · ${incomeSummary(state)}</span></div>
     <div class="stat"><span class="stat-label">Pengeluaran</span><strong class="stat-value">${formatRupiah(spent)}</strong><span class="stat-note">${state.expenses.length} catatan belanja</span></div>
     <div class="stat ${left < 0 ? 'danger' : ''}"><span class="stat-label">Sisa Uang</span><strong class="stat-value">${formatRupiah(left)}</strong><span class="stat-note">dari pemasukan ${formatShort(income)}</span></div>
     <div class="stat"><span class="stat-label">Tingkat Menabung</span><strong class="stat-value">${rate.toFixed(1).replace('.', ',')}%</strong><span class="stat-note">target keluarga: 15%</span></div>
@@ -101,6 +125,7 @@ function dashboard(state) {
   ${statCards(state)}
   ${over.length ? `<p class="alert">⚠ Lewat anggaran: ${over.map((c) => `${c.name} (${formatRupiah(spent[c.id] - c.budget)} di atas batas)`).join(', ')}. Lihat <a href="#/budget">halaman Anggaran</a> untuk menyesuaikan.</p>` : ''}
   ${projectionPanel(state)}
+  ${incomeSection(state)}
   <div class="grid-2">
     <section class="card">
       <h2>Belanja per Kategori</h2>
@@ -119,6 +144,7 @@ function dashboard(state) {
         <label>Kategori <select name="category">${state.categories.map((c) => `<option value="${c.id}">${c.name}</option>`).join('')}</select></label>
         <button class="btn primary" type="submit">+ Tambah</button>
       </form>
+      <p class="hint" id="add-status" role="status"></p>
       <p class="hint">Tersimpan di perangkat ini dan langsung mengubah total, diagram, dan halaman Anggaran.</p>
     </section>
   </div>`;
@@ -191,15 +217,26 @@ function goalsPage(state) {
   const cards = state.goals.map((goal) => {
     const pct = goal.target > 0 ? (goal.saved / goal.target) * 100 : 0;
     const left = goal.target - goal.saved;
+    const estimate = goalEstimate(goal);
+    const estimateText = estimate.status === 'done'
+      ? '🎉 Target tercapai — tidak perlu setoran lagi.'
+      : estimate.status === 'ok'
+        ? `Perkiraan tercapai: <strong>±${estimate.months} bulan</strong> (sekitar ${estimateMonthLabel(estimate.months)}) dengan setoran ${formatRupiah(goal.monthly)}/bulan.`
+        : 'Isi setoran/bulan di bawah untuk melihat perkiraan kapan target tercapai.';
     return `<article class="card goal-card">
       <h2>${goal.name}</h2>
       <p class="goal-detail">${goal.detail}</p>
       <p class="goal-figures"><strong>${formatRupiah(goal.saved)}</strong> dari ${formatRupiah(goal.target)}</p>
       <div class="bar" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100" aria-label="Tabungan ${goal.name}"><div class="bar-fill goal" style="width:${Math.min(pct, 100)}%;background:${goal.color}"></div></div>
       <p class="goal-pct">${pct.toFixed(0)}% tercapai · ${left > 0 ? 'kurang ' + formatRupiah(left) : 'target tercapai 🎉'}</p>
+      <p class="goal-estimate">${estimateText}</p>
       <form class="form-inline goal-deposit" data-goal="${goal.id}">
         <label>Tambah tabungan (Rp) <input name="amount" type="number" min="1000" step="1000" required placeholder="100000"></label>
         <button class="btn primary" type="submit">+ Nabung</button>
+      </form>
+      <form class="form-inline goal-monthly">
+        <label>Setoran/bulan (Rp) <input type="number" min="0" step="10000" value="${goal.monthly || 0}" data-action="monthly-input" data-id="${goal.id}" aria-label="Setoran bulanan untuk ${goal.name}"></label>
+        <span class="hint">Diubah otomatis tersimpan; perkiraan di atas langsung mengikuti.</span>
       </form>
     </article>`;
   }).join('');
@@ -215,6 +252,7 @@ function goalsPage(state) {
       <label>Nama tujuan <input name="name" required maxlength="60" placeholder="cth. DP rumah"></label>
       <label>Target (Rp) <input name="target" type="number" min="10000" step="10000" required placeholder="20000000"></label>
       <label>Sudah terkumpul (Rp) <input name="saved" type="number" min="0" step="10000" value="0" required></label>
+      <label>Setoran/bulan (Rp) <input name="monthly" type="number" min="0" step="10000" value="0" placeholder="cth. 500000"></label>
       <label>Keterangan <input name="detail" maxlength="100" placeholder="cth. Target akhir 2027"></label>
       <button class="btn primary" type="submit">Buat Tujuan</button>
     </form>
@@ -251,11 +289,12 @@ function reportPage(state) {
   <h1>Laporan Bulanan — ${MONTH_LABEL}</h1>
   <p class="lede">Ringkasan lengkap bulan ini untuk ${HOUSEHOLD_NAME}: pemasukan, pengeluaran per kategori, dan sisa untuk ditabung. Unduh catatan belanjanya sebagai CSV untuk arsip atau diolah di spreadsheet.</p>
   <section class="stats" aria-label="Ringkasan bulanan">
-    <div class="stat"><span class="stat-label">Pemasukan</span><strong class="stat-value">${formatRupiah(income)}</strong><span class="stat-note">Gaji + katering</span></div>
+    <div class="stat"><span class="stat-label">Pemasukan</span><strong class="stat-value">${formatRupiah(income)}</strong><span class="stat-note">${state.income.length} sumber · ${incomeSummary(state)}</span></div>
     <div class="stat"><span class="stat-label">Pengeluaran</span><strong class="stat-value">${formatRupiah(out)}</strong><span class="stat-note">${state.expenses.length} catatan · ${totalPct.toFixed(0)}% dari anggaran</span></div>
     <div class="stat ${left < 0 ? 'danger' : ''}"><span class="stat-label">Sisa Uang</span><strong class="stat-value">${formatRupiah(left)}</strong><span class="stat-note">tersedia untuk ditabung</span></div>
     <div class="stat"><span class="stat-label">Total Tabungan</span><strong class="stat-value">${formatRupiah(savedTotal)}</strong><span class="stat-note">${state.goals.length} tujuan aktif</span></div>
   </section>
+  ${incomeSection(state)}
   <section class="card">
     <h2>Per Kategori — Anggaran vs Realisasi</h2>
     <div class="table-scroll"><table class="table"><thead><tr><th>Kategori</th><th>Anggaran</th><th>Realisasi</th><th>Selisih</th><th>% Anggaran</th></tr></thead>
@@ -274,19 +313,37 @@ function reportPage(state) {
 function trendsPage(state) {
   const months = state.history.map((m) => ({ ...m }));
   months[months.length - 1].spent = totalSpent(state);
-  const best = months.reduce((bestMonth, m) => (totalIncome(state) - m.spent > totalIncome(state) - bestMonth.spent ? m : bestMonth), months[0]);
+  months[months.length - 1].income = totalIncome(state);
+  const best = months.reduce((bestMonth, m) => (m.income - m.spent > bestMonth.income - bestMonth.spent ? m : bestMonth), months[0]);
   const avgSpent = months.reduce((sum, m) => sum + m.spent, 0) / months.length;
+  const weeks = weeklyBreakdown(state);
+  const weekRows = weeks.map((w) => `<tr>
+    <td><strong>${w.label}</strong><br><span class="week-range">${w.range}</span></td>
+    <td class="amount">${formatRupiah(w.total)}</td>
+    <td class="amount">${formatRupiah(w.dailyAverage)}/hari</td>
+    <td>${w.biggestCategory} (${formatRupiah(w.biggestCategoryAmount)})</td>
+    <td>${w.topExpense ? `${w.topExpense.note} — ${formatRupiah(w.topExpense.amount)}` : '—'}</td>
+    <td class="amount">${w.count} catatan</td>
+  </tr>`).join('');
+  const busiest = [...weeks].sort((a, b) => b.total - a.total)[0];
   const rows = months.map((m) => {
     const saved = m.income - m.spent;
     return `<tr><td>${m.month}</td><td class="amount">${formatRupiah(m.income)}</td><td class="amount">${formatRupiah(m.spent)}</td><td class="amount ${saved >= 0 ? 'positive' : 'negative'}">${saved >= 0 ? '+' : ''}${formatRupiah(saved)}</td><td class="amount">${((saved / m.income) * 100).toFixed(1).replace('.', ',')}%</td></tr>`;
   }).join('');
   return `
   <h1>Tren 6 Bulan Terakhir</h1>
-  <p class="lede">Pemasukan keluarga stabil di ${formatRupiah(8500000)} sebulan; yang berubah adalah pengeluarannya. Bulan paling hemat: <strong>${best.month}</strong> (sisa ${formatRupiah(best.income - best.spent)}). Rata-rata belanja: <strong>${formatRupiah(avgSpent)}</strong> per bulan.</p>
+  <p class="lede">Pemasukan keluarga bulan ini ${formatRupiah(totalIncome(state))} dari ${state.income.length} sumber; yang berubah adalah pengeluarannya. Bulan paling hemat: <strong>${best.month}</strong> (sisa ${formatRupiah(best.income - best.spent)}). Rata-rata belanja: <strong>${formatRupiah(avgSpent)}</strong> per bulan.</p>
   <section class="card">
     <h2>Pemasukan vs Pengeluaran — Jun–Nov 2026</h2>
     <div class="chart-wrap"><canvas id="trend" role="img" aria-label="Grafik batang pemasukan dan pengeluaran enam bulan terakhir"></canvas></div>
-    <p class="hint">Batang oranye bulan November dihitung dari catatan belanja saat ini — tambah pengeluaran dan grafik ini ikut berubah.</p>
+    <p class="hint">Batang oranye bulan November dihitung dari catatan belanja saat ini — tambah pengeluaran dan grafik ini ikut berubah. Pemasukan November dihitung dari daftar pemasukan, sama seperti di dasbor.</p>
+  </section>
+  <section class="card">
+    <h2>Belanja Mingguan — November 2026</h2>
+    <p class="hint">Minggu paling boros sejauh ini: <strong>${busiest.label} (${busiest.range})</strong> dengan total ${formatRupiah(busiest.total)}. Grafik di bawah membandingkan keempat minggu; tabelnya menunjukkan kategori terbesar dan pengeluaran terbesar tiap minggu.</p>
+    <div class="chart-wrap"><canvas id="weekly" role="img" aria-label="Grafik batang belanja per minggu di bulan November"></canvas></div>
+    <div class="table-scroll"><table class="table"><thead><tr><th>Minggu</th><th>Total Belanja</th><th>Rata-rata/Hari</th><th>Kategori Terbesar</th><th>Pengeluaran Terbesar</th><th>Catatan</th></tr></thead>
+    <tbody>${weekRows}</tbody></table></div>
   </section>
   <section class="card">
     <h2>Rincian per Bulan</h2>

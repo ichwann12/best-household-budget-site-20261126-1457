@@ -144,3 +144,76 @@ function drawTrend(canvas, months) {
   ctx.fillStyle = '#44403c';
   ctx.fillText('Pengeluaran', padLeft + 128, 16);
 }
+
+// Batang mingguan: total belanja Minggu 1–4 November, satu batang per
+// minggu, minggu paling boros diberi warna amber gelap supaya langsung
+// terlihat. Nilainya ditulis di atas tiap batang ("3,9" = Rp 3,9 jt).
+function drawWeeklyBars(canvas, weeks) {
+  const wrapWidth = canvas.parentElement.clientWidth || 640;
+  const width = Math.min(wrapWidth, 720);
+  const height = 260;
+  const ctx = setupCanvas(canvas, width, height);
+  const padLeft = 56;
+  const padRight = 12;
+  const padTop = 26;
+  const padBottom = 30;
+  const plotW = width - padLeft - padRight;
+  const plotH = height - padTop - padBottom;
+  const maxTotal = Math.max(...weeks.map((w) => w.total), 1);
+  const maxValue = maxTotal * 1.15;
+
+  ctx.clearRect(0, 0, width, height);
+  // Belum ada pengeluaran sama sekali: tulis pesan, jangan gambar sumbu kosong.
+  if (weeks.every((w) => w.total <= 0)) {
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '14px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Belum ada pengeluaran di bulan November', width / 2, height / 2);
+    return;
+  }
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.fillStyle = '#78716c';
+  ctx.textAlign = 'right';
+  // Gridlines setiap Rp 1 jt.
+  for (let value = 0; value <= maxValue; value += 1000000) {
+    const y = padTop + plotH - (value / maxValue) * plotH;
+    ctx.strokeStyle = '#e7e5e4';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(width - padRight, y);
+    ctx.stroke();
+    ctx.fillText(value === 0 ? '0' : 'Rp ' + value / 1000000 + ' jt', padLeft - 8, y + 4);
+  }
+
+  const slot = plotW / weeks.length;
+  const barW = Math.min(64, slot * 0.55);
+  weeks.forEach((week, i) => {
+    const x0 = padLeft + i * slot + slot / 2;
+    const barH = (week.total / maxValue) * plotH;
+    const y = padTop + plotH - barH;
+    const isBusiest = week.total === maxTotal && week.total > 0;
+    ctx.fillStyle = isBusiest ? '#b45309' : '#0f766e';
+    ctx.fillRect(x0 - barW / 2, y, barW, barH);
+    // Nilai di atas batang; kalau batangnya terlalu pendek, tulis di
+    // bawah nilai tetap di dalam area plot supaya tidak terpotong. Nilai
+    // 0 tidak ditulis — batangnya memang tidak ada.
+    ctx.fillStyle = '#1c1917';
+    ctx.font = '700 12px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    if (week.total > 0) ctx.fillText(shortMillions(week.total), x0, Math.max(y - 6, padTop + 2));
+    // Label minggu + rentang tanggal di bawah sumbu.
+    ctx.fillStyle = '#57534e';
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillText(week.label, x0, height - 22);
+    ctx.fillStyle = '#78716c';
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.fillText(week.range, x0, height - 8);
+    // Jumlah catatan kecil di dalam batang, kalau muat.
+    if (barH > 22) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText(week.count + ' catatan', x0, y + 15);
+    }
+  });
+}

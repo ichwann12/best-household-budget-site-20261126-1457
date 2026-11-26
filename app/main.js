@@ -39,8 +39,11 @@ function drawCharts(route) {
     if (canvas) {
       const months = state.history.map((m) => ({ ...m }));
       months[months.length - 1].spent = totalSpent(state);
+      months[months.length - 1].income = totalIncome(state);
       drawTrend(canvas, months);
     }
+    const weeklyCanvas = document.getElementById('weekly');
+    if (weeklyCanvas) drawWeeklyBars(weeklyCanvas, weeklyBreakdown(state));
   }
 }
 
@@ -84,6 +87,25 @@ function addExpense(form) {
   return true;
 }
 
+// Pemasukan baru: sumber, tanggal, jumlah. Masuk ke daftar pemasukan dan
+// langsung mengubah total pemasukan di semua halaman. Jumlah di atas
+// Rp 100 jt ditolak sebagai kemungkinan salah ketik — keluarga ini tidak
+// pernah menerima sebesar itu dalam sekali masuk.
+function addIncome(form) {
+  const fields = readForm(form);
+  const amount = Math.round(Number(fields.amount));
+  if (!fields.source || !Number.isFinite(amount) || amount < 1000 || amount > 100000000) return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fields.date || '')) return false;
+  state.income.push({
+    id: 'i' + Date.now().toString(36),
+    date: fields.date,
+    source: fields.source.trim(),
+    amount,
+  });
+  saveState(state);
+  return true;
+}
+
 function applyExpenseFilter() {
   const category = document.getElementById('filter-category').value;
   const query = document.getElementById('filter-search').value.trim().toLowerCase();
@@ -112,6 +134,22 @@ function wirePage(route) {
         render();
         const status = document.getElementById('add-status');
         if (status) status.textContent = '✓ Pengeluaran tersimpan — total dan diagram sudah diperbarui.';
+      }
+    });
+  }
+
+  // Add-income forms (dashboard and report page share the same section).
+  const incomeForm = document.getElementById('add-income');
+  if (incomeForm) {
+    incomeForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const status = document.getElementById('income-status');
+      if (addIncome(incomeForm)) {
+        render();
+        const fresh = document.getElementById('income-status');
+        if (fresh) fresh.textContent = '✓ Pemasukan tersimpan — total pemasukan di semua halaman sudah diperbarui.';
+      } else if (status) {
+        status.textContent = '⚠ Periksa lagi isian Anda: sumber wajib diisi dan jumlah antara Rp 1.000 sampai Rp 100.000.000.';
       }
     });
   }
@@ -162,6 +200,7 @@ function wirePage(route) {
       const fields = readForm(goalForm);
       const target = Math.round(Number(fields.target));
       const saved = Math.round(Number(fields.saved));
+      const monthly = Math.round(Number(fields.monthly));
       if (!fields.name || !Number.isFinite(target) || target < 10000 || !Number.isFinite(saved) || saved < 0) return;
       const palette = ['#0f766e', '#0284c7', '#ca8a04', '#db2777', '#7c3aed'];
       state.goals.push({
@@ -170,10 +209,26 @@ function wirePage(route) {
         detail: (fields.detail || 'Tujuan baru keluarga').trim(),
         target,
         saved,
+        monthly: Number.isFinite(monthly) && monthly > 0 ? monthly : 0,
         color: palette[state.goals.length % palette.length],
       });
       saveState(state);
       render();
+    });
+  }
+
+  // Goals page: editing the monthly deposit updates the "Perkiraan
+  // tercapai" line live — the input saves on change, then re-renders.
+  for (const input of app.querySelectorAll('[data-action="monthly-input"]')) {
+    input.addEventListener('change', () => {
+      const goal = state.goals.find((g) => g.id === input.dataset.id);
+      if (!goal) return;
+      const value = Math.round(Number(input.value));
+      if (Number.isFinite(value) && value >= 0) {
+        goal.monthly = value;
+        saveState(state);
+        render();
+      }
     });
   }
 
@@ -201,11 +256,19 @@ function wirePage(route) {
 // Delete buttons, delegated once on #app so filtered rows work too and a
 // re-render never stacks another listener on the same element.
 app.addEventListener('click', (event) => {
-  const button = event.target.closest('[data-action="delete-expense"]');
-  if (!button) return;
-  state.expenses = state.expenses.filter((e) => e.id !== button.dataset.id);
-  saveState(state);
-  render();
+  const expenseButton = event.target.closest('[data-action="delete-expense"]');
+  if (expenseButton) {
+    state.expenses = state.expenses.filter((e) => e.id !== expenseButton.dataset.id);
+    saveState(state);
+    render();
+    return;
+  }
+  const incomeButton = event.target.closest('[data-action="delete-income"]');
+  if (incomeButton) {
+    state.income = state.income.filter((line) => line.id !== incomeButton.dataset.id);
+    saveState(state);
+    render();
+  }
 });
 
 window.addEventListener('hashchange', render);

@@ -1,10 +1,11 @@
 // Dompet Rumah — household budget data and state.
 //
 // One household, one month, real figures in rupiah. Everything the pages
-// show comes from this file: income, the category budgets, every expense
-// line, the savings goals and the six-month history. Edits the household
-// makes in the browser (a new expense, a changed budget, a deposit into a
-// goal) are saved to localStorage and reloaded on the next visit, so the
+// show comes from this file: the income entries, the category budgets,
+// every expense line, the savings goals and the six-month history. Edits
+// the household makes in the browser (a new expense, a changed budget, a
+// deposit into a goal, a new income entry, a monthly deposit per goal)
+// are saved to localStorage and reloaded on the next visit, so the
 // numbers the family sees are always their own latest numbers.
 
 const MONTH_LABEL = 'November 2026';
@@ -14,9 +15,13 @@ const CURRENCY = 'Rp';
 const STORAGE_KEY = 'dompet-rumah-v1';
 
 const seedState = {
+  // Pemasukan bukan satu angka tetap: daftar sumber uang masuk bulan ini,
+  // masing-masing dengan tanggal dan jumlah. Total pemasukan di semua
+  // halaman selalu dihitung dari daftar ini (lihat totalIncome).
   income: [
-    { source: 'Gaji — Ayah (kantor)', amount: 7000000 },
-    { source: 'Usaha sampingan — Ibu (katering)', amount: 1500000 },
+    { id: 'i01', date: '2026-11-01', source: 'Gaji — Ayah (kantor)', amount: 7000000 },
+    { id: 'i02', date: '2026-11-03', source: 'Usaha sampingan — Ibu (katering)', amount: 1500000 },
+    { id: 'i03', date: '2026-11-15', source: 'Freelance desain — Ayah', amount: 750000 },
   ],
   // budget = the plan for the month; spent is always computed from the
   // expense lines below, never typed in by hand.
@@ -59,9 +64,11 @@ const seedState = {
     { id: 'e25', date: '2026-11-26', category: 'other', note: 'Pulsa & paket data', amount: 120000 },
   ],
   goals: [
-    { id: 'g1', name: 'Dana Darurat', detail: '6 bulan biaya hidup, untuk keadaan tak terduga', target: 10000000, saved: 6400000, color: '#0f766e' },
-    { id: 'g2', name: 'Liburan Keluarga ke Bali', detail: 'Berangkat Juni 2027, 4 orang', target: 5000000, saved: 2150000, color: '#0284c7' },
-    { id: 'g3', name: 'Motor Baru', detail: 'Ganti motor lama yang sering mogok', target: 15000000, saved: 4800000, color: '#ca8a04' },
+    // monthly = setoran rutin tiap bulan untuk tujuan ini; dari angka
+    // inilah halaman Tabungan memperkirakan kapan target tercapai.
+    { id: 'g1', name: 'Dana Darurat', detail: '6 bulan biaya hidup, untuk keadaan tak terduga', target: 10000000, saved: 6400000, monthly: 900000, color: '#0f766e' },
+    { id: 'g2', name: 'Liburan Keluarga ke Bali', detail: 'Berangkat Juni 2027, 4 orang', target: 5000000, saved: 2150000, monthly: 500000, color: '#0284c7' },
+    { id: 'g3', name: 'Motor Baru', detail: 'Ganti motor lama yang sering mogok', target: 15000000, saved: 4800000, monthly: 600000, color: '#ca8a04' },
   ],
   // Six months of history for the trend page (income vs money actually spent).
   history: [
@@ -81,6 +88,22 @@ function loadState() {
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.expenses) || !Array.isArray(parsed.categories)) {
       return structuredClone(seedState);
+    }
+    // Migrasi data lama: pemasukan tanpa id/tanggal dan tujuan tanpa
+    // setoran bulanan dilengkapkan dengan nilai wajar, supaya data yang
+    // tersimpan sebelum fitur ini tetap bisa dipakai.
+    if (!Array.isArray(parsed.income)) parsed.income = structuredClone(seedState.income);
+    parsed.income = parsed.income.map((line, index) => ({
+      id: line.id || 'i' + Date.now().toString(36) + index,
+      date: typeof line.date === 'string' && line.date ? line.date : '2026-11-01',
+      source: String(line.source || 'Pemasukan lain'),
+      amount: Number(line.amount) || 0,
+    }));
+    if (Array.isArray(parsed.goals)) {
+      for (const goal of parsed.goals) {
+        if (!Number.isFinite(Number(goal.monthly)) || Number(goal.monthly) < 0) goal.monthly = 0;
+        goal.monthly = Math.round(Number(goal.monthly));
+      }
     }
     return parsed;
   } catch {
@@ -229,6 +252,89 @@ function dailyPaceByCategory(state) {
   }
   return pace;
 }
+// Ringkasan singkat sumber pemasukan untuk kartu statistik, misal
+// "Gaji Rp 7 jt + katering Rp 1,5 jt + freelance Rp 750 rb" — selalu
+// dihitung dari daftar pemasukan, bukan teks yang ditulis tangan.
+function incomeSummary(state) {
+  if (!state.income.length) return 'belum ada pemasukan tercatat';
+  return state.income
+    .map((line) => {
+      const short = line.source.split('—')[0].trim().toLowerCase();
+      return `${short} ${formatShort(line.amount)}`;
+    })
+    .join(' + ');
+}
+
+// ---- Belanja mingguan: pengeluaran November dikelompokkan per minggu. ----
+
+// Minggu 1 = tanggal 1–7, Minggu 2 = 8–14, Minggu 3 = 15–21,
+// Minggu 4 = 22–30. Tiap minggu mencatat total, kategori terbesar, dan
+// satu pengeluaran terbesar — dipakai tabel dan grafik di halaman Tren.
+function weeklyBreakdown(state) {
+  const weeks = [1, 2, 3, 4].map((n) => ({
+    week: n,
+    label: 'Minggu ' + n,
+    range: ['1–7 Nov', '8–14 Nov', '15–21 Nov', '22–30 Nov'][n - 1],
+    total: 0,
+    expenses: [],
+    byCategory: {},
+  }));
+  for (const expense of state.expenses) {
+    const day = Number(expense.date.slice(8, 10));
+    if (!Number.isFinite(day) || day < 1 || day > 30) continue;
+    const bucket = weeks[Math.min(3, Math.floor((day - 1) / 7))];
+    bucket.total += expense.amount;
+    bucket.expenses.push(expense);
+    bucket.byCategory[expense.category] = (bucket.byCategory[expense.category] || 0) + expense.amount;
+  }
+  return weeks.map((week) => {
+    const biggest = Object.entries(week.byCategory)
+      .sort((a, b) => b[1] - a[1])[0];
+    const biggestCategory = biggest
+      ? state.categories.find((c) => c.id === biggest[0])
+      : null;
+    const top = [...week.expenses].sort((a, b) => b.amount - a.amount)[0] || null;
+    // Rata-rata belanja harian minggu itu, supaya keluarga bisa
+    // membandingkan minggu yang panjang (Minggu 4 = 9 hari) dengan yang
+    // lain secara adil.
+    const daysInWeek = week.week === 4 ? 9 : 7;
+    return {
+      week: week.week,
+      label: week.label,
+      range: week.range,
+      total: week.total,
+      count: week.expenses.length,
+      dailyAverage: week.total / daysInWeek,
+      biggestCategory: biggestCategory ? biggestCategory.name : '—',
+      biggestCategoryAmount: biggest ? biggest[1] : 0,
+      topExpense: top ? { note: top.note, amount: top.amount, date: top.date } : null,
+    };
+  });
+}
+
+// ---- Perkiraan tercapai untuk tiap tujuan tabungan. ----
+
+// months = ceil((target - saved) / setoran bulanan). Kalau target sudah
+// tercapai hasilnya 'done'; kalau belum ada setoran bulanan, 'unknown'
+// supaya halaman tidak menampilkan angka yang dibuat-buat.
+function goalEstimate(goal) {
+  const left = goal.target - goal.saved;
+  if (left <= 0) return { status: 'done', months: 0, left: 0 };
+  const monthly = Number(goal.monthly) || 0;
+  if (monthly <= 0) return { status: 'unknown', months: null, left };
+  return { status: 'ok', months: Math.ceil(left / monthly), left };
+}
+
+// Nama bulan saat perkiraan tercapai, dihitung dari November 2026:
+// misal 3 bulan lagi = "Feb 2027".
+function estimateMonthLabel(months) {
+  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  const baseMonth = 10; // November (0-based)
+  const baseYear = 2026;
+  const total = baseMonth + months;
+  return `${names[total % 12]} ${baseYear + Math.floor(total / 12)}`;
+}
+
 // CSV export for the monthly report page: one row per expense, newest
 // first, notes quoted so commas and quotes inside a note stay intact.
 function buildExpensesCsv(state) {
