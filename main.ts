@@ -1,3 +1,8 @@
+// Penyerahan "Dompet Rumah" sebagai situs statis: skrip kecil ini menyalin
+// folder app/ dan screenshots/ ke direktori keluaran, lalu merangkum
+// semuanya ke dalam dossier.json untuk penilai — tanpa server, tanpa
+// jaringan, hanya berkas yang sudah ada di repo ini.
+//
 // Dompet Rumah — the hand-in program (Node 22, standard library only).
 //
 // The entry is the static site in app/ beside this file plus the
@@ -17,7 +22,12 @@ import { buildDossier } from './vendor/makefun-frontend.ts';
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-mkdirSync(out, { recursive: true });
+try {
+  mkdirSync(out, { recursive: true });
+} catch (error) {
+  console.error(`Tidak bisa membuat direktori keluaran ${out}: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
 cpSync(join(here, 'app'), join(out, 'app'), { recursive: true });
 mkdirSync(join(out, 'screenshots'), { recursive: true });
 if (existsSync(join(here, 'screenshots'))) {

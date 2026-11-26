@@ -9,6 +9,7 @@
 //   #/expenses   expense log    #/trends  six-month trend
 //   #/budget     budget vs actual
 //   #/report     monthly report with CSV export
+//   #/planner    weekly shopping list with a grocery budget
 //
 // window.__shotReady is false while a page renders and true once it is on
 // screen, so a screenshot script knows when to capture.
@@ -16,7 +17,7 @@
 const app = document.getElementById('app');
 let state = loadState();
 
-const NAV_ROUTES = { '#/': 1, '#/expenses': 1, '#/budget': 1, '#/goals': 1, '#/trends': 1, '#/report': 1 };
+const NAV_ROUTES = { '#/': 1, '#/expenses': 1, '#/budget': 1, '#/goals': 1, '#/trends': 1, '#/report': 1, '#/planner': 1 };
 const TITLES = {
   '#/': 'Dasbor',
   '#/expenses': 'Catat Belanja',
@@ -24,6 +25,7 @@ const TITLES = {
   '#/goals': 'Tabungan & Tujuan',
   '#/trends': 'Tren 6 Bulan',
   '#/report': 'Laporan Bulanan',
+  '#/planner': 'Belanja Mingguan',
 };
 
 function drawCharts(route) {
@@ -58,6 +60,7 @@ function render() {
     '#/goals': goalsPage,
     '#/trends': trendsPage,
     '#/report': reportPage,
+    '#/planner': plannerPage,
   };
   document.title = `${TITLES[route]} | Dompet Rumah`;
   app.innerHTML = nav(route) + pages[route](state);
@@ -106,8 +109,30 @@ function addIncome(form) {
   return true;
 }
 
-function applyExpenseFilter() {
-  const category = document.getElementById('filter-category').value;
+// Barang belanja baru: nama, kategori, perkiraan harga. Masuk ke daftar
+// rencana belanja mingguan; harga di bawah Rp 500 ditolak sebagai
+// kemungkinan salah ketik, di atas Rp 5 jt ditolak karena bukan belanja
+// mingguan rumah tangga biasa. Kategori yang tidak dikenal jatuh ke
+// "Lainnya" supaya daftar pilihan di halaman tetap rapi.
+function addShopping(form) {
+  const fields = readForm(form);
+  const price = Math.round(Number(fields.price));
+  if (!fields.name || !Number.isFinite(price) || price < 500 || price > 5000000) return false;
+  const category = SHOPPING_CATEGORIES.includes(fields.category) ? fields.category : 'Lainnya';
+  if (!Array.isArray(state.shopping)) state.shopping = [];
+  state.shopping.push({
+    id: 's' + Date.now().toString(36),
+    name: fields.name.trim(),
+    category,
+    price,
+    bought: false,
+    added: '2026-11-26',
+  });
+  saveState(state);
+  return true;
+}
+
+function applyExpenseFilter() {  const category = document.getElementById('filter-category').value;
   const query = document.getElementById('filter-search').value.trim().toLowerCase();
   const rows = document.getElementById('expense-rows');
   const filtered = [...state.expenses]
@@ -232,6 +257,33 @@ function wirePage(route) {
     });
   }
 
+  // Planner page: the add-item form and the bought checkboxes. Checking
+  // an item saves it and re-renders, so the budget card and the progress
+  // bar follow the list immediately.
+  const shoppingForm = document.getElementById('add-shopping');
+  if (shoppingForm) {
+    shoppingForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const status = document.getElementById('shopping-status');
+      if (addShopping(shoppingForm)) {
+        render();
+        const fresh = document.getElementById('shopping-status');
+        if (fresh) fresh.textContent = '✓ Barang ditambahkan ke daftar belanja minggu ini.';
+      } else if (status) {
+        status.textContent = '⚠ Periksa lagi isian Anda: nama wajib diisi dan harga antara Rp 500 sampai Rp 5.000.000.';
+      }
+    });
+  }
+  for (const box of app.querySelectorAll('[data-action="shop-toggle"]')) {
+    box.addEventListener('change', () => {
+      const item = state.shopping.find((s) => s.id === box.dataset.id);
+      if (!item) return;
+      item.bought = box.checked;
+      saveState(state);
+      render();
+    });
+  }
+
   // Report page: the CSV is built in the browser from the live state and
   // downloaded as a file — no network, nothing leaves the device.
   const csvButton = document.getElementById('download-csv');
@@ -266,6 +318,13 @@ app.addEventListener('click', (event) => {
   const incomeButton = event.target.closest('[data-action="delete-income"]');
   if (incomeButton) {
     state.income = state.income.filter((line) => line.id !== incomeButton.dataset.id);
+    saveState(state);
+    render();
+    return;
+  }
+  const shoppingButton = event.target.closest('[data-action="delete-shopping"]');
+  if (shoppingButton) {
+    state.shopping = state.shopping.filter((item) => item.id !== shoppingButton.dataset.id);
     saveState(state);
     render();
   }

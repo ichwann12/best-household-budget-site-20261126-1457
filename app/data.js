@@ -70,6 +70,23 @@ const seedState = {
     { id: 'g2', name: 'Liburan Keluarga ke Bali', detail: 'Berangkat Juni 2027, 4 orang', target: 5000000, saved: 2150000, monthly: 500000, color: '#0284c7' },
     { id: 'g3', name: 'Motor Baru', detail: 'Ganti motor lama yang sering mogok', target: 15000000, saved: 4800000, monthly: 600000, color: '#ca8a04' },
   ],
+  // Rencana belanja mingguan: daftar barang untuk minggu 23–29 Nov 2026,
+  // masing-masing dengan perkiraan harga dan tanda sudah dibeli atau
+  // belum. Anggaran mingguan di bawah diambil dari anggaran Belanja
+  // Harian, dibagi empat minggu — halaman Belanja Mingguan menghitung
+  // sendiri berapa yang masih perlu dibeli dari daftar ini.
+  weeklyGroceryBudget: 450000,
+  shopping: [
+    { id: 's01', name: 'Beras 10 kg', category: 'Bahan pokok', price: 128000, bought: false, added: '2026-11-23' },
+    { id: 's02', name: 'Ayam potong 1 kg', category: 'Daging & ikan', price: 36000, bought: false, added: '2026-11-23' },
+    { id: 's03', name: 'Telur ayam 1 kg', category: 'Daging & ikan', price: 28000, bought: true, added: '2026-11-23' },
+    { id: 's04', name: 'Sayur bayam & kangkung', category: 'Sayur & buah', price: 15000, bought: false, added: '2026-11-23' },
+    { id: 's05', name: 'Minyak goreng 2 liter', category: 'Bahan pokok', price: 42000, bought: false, added: '2026-11-24' },
+    { id: 's06', name: 'Sabun cuci & deterjen', category: 'Kebersihan', price: 38000, bought: false, added: '2026-11-24' },
+    { id: 's07', name: 'Buah pisang & jeruk', category: 'Sayur & buah', price: 32000, bought: true, added: '2026-11-25' },
+    { id: 's08', name: 'Kopi & gula pasir', category: 'Bahan pokok', price: 45000, bought: false, added: '2026-11-25' },
+    { id: 's09', name: 'Susu UHT 1 liter', category: 'Minuman', price: 21000, bought: false, added: '2026-11-26' },
+  ],
   // Six months of history for the trend page (income vs money actually spent).
   history: [
     { month: 'Jun 2026', income: 8500000, spent: 7050000 },
@@ -104,6 +121,21 @@ function loadState() {
         if (!Number.isFinite(Number(goal.monthly)) || Number(goal.monthly) < 0) goal.monthly = 0;
         goal.monthly = Math.round(Number(goal.monthly));
       }
+    }
+    // Migrasi data lama: daftar belanja mingguan belum ada sebelum fitur
+    // ini, jadi data tersimpan lama dilengkapi dari data contoh dan tiap
+    // barangnya dirapikan (harga dibulatkan, tanda sudah dibeli dijaga).
+    if (!Array.isArray(parsed.shopping)) parsed.shopping = structuredClone(seedState.shopping);
+    parsed.shopping = parsed.shopping.map((item, index) => ({
+      id: item.id || 's' + Date.now().toString(36) + index,
+      name: String(item.name || 'Barang belanja'),
+      category: String(item.category || 'Lainnya'),
+      price: Math.max(0, Math.round(Number(item.price) || 0)),
+      bought: item.bought === true,
+      added: typeof item.added === 'string' && item.added ? item.added : '2026-11-26',
+    }));
+    if (!Number.isFinite(Number(parsed.weeklyGroceryBudget)) || Number(parsed.weeklyGroceryBudget) < 0) {
+      parsed.weeklyGroceryBudget = seedState.weeklyGroceryBudget;
     }
     return parsed;
   } catch {
@@ -333,6 +365,34 @@ function estimateMonthLabel(months) {
   const baseYear = 2026;
   const total = baseMonth + months;
   return `${names[total % 12]} ${baseYear + Math.floor(total / 12)}`;
+}
+
+// ---- Rencana belanja mingguan. ----
+
+// Kategori barang belanja — dipakai daftar pilihan di formulir tambah
+// barang, supaya kategori yang diketik keluarga tidak berantakan ejaannya.
+const SHOPPING_CATEGORIES = ['Bahan pokok', 'Sayur & buah', 'Daging & ikan', 'Minuman', 'Kebersihan', 'Lainnya'];
+
+// Total rencana belanja: anggaran mingguan, perkiraan harga barang yang
+// belum dibeli, dan yang sudah dibeli — dipakai kartu anggaran dan bilah
+// kemajuan di halaman Belanja Mingguan.
+function plannerTotals(state) {
+  const items = Array.isArray(state.shopping) ? state.shopping : [];
+  const budget = Number(state.weeklyGroceryBudget) || 0;
+  const bought = items.filter((item) => item.bought);
+  const pending = items.filter((item) => !item.bought);
+  const boughtTotal = bought.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+  const pendingTotal = pending.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+  return {
+    budget,
+    count: items.length,
+    boughtCount: bought.length,
+    pendingCount: pending.length,
+    boughtTotal,
+    pendingTotal,
+    remaining: budget - pendingTotal,
+    over: pendingTotal > budget,
+  };
 }
 
 // CSV export for the monthly report page: one row per expense, newest

@@ -8,6 +8,7 @@
 //   #/goals      Tabungan — savings goals with deposits
 //   #/trends     Tren — six months of income vs spending
 //   #/report     Laporan — monthly summary per category, with CSV export
+//   #/planner    Belanja Mingguan — weekly shopping list against a budget
 //
 // Every figure is rendered from the live state (see data.js), so a new
 // expense, a changed budget or a deposit redraws every page at once.
@@ -20,6 +21,7 @@ const NAV = [
   ['#/goals', 'Tabungan'],
   ['#/trends', 'Tren'],
   ['#/report', 'Laporan'],
+  ['#/planner', 'Belanja Mingguan'],
 ];
 
 function incomeSection(state) {
@@ -357,5 +359,46 @@ function trendsPage(state) {
       <li><strong>Pertahankan Belanja Harian</strong> — Rp 1.642.000 dari Rp 1.800.000: belanja pasar mingguan terbukti lebih murah daripada supermarket harian.</li>
       <li><strong>Otomatiskan tabungan</strong> — pindahkan Rp 900.000 ke Dana Darurat tiap tanggal 1, sebelum uang sempat terpakai.</li>
     </ul>
+  </section>`;
+}
+
+function plannerPage(state) {
+  const totals = plannerTotals(state);
+  const pct = totals.count > 0 ? Math.round((totals.boughtCount / totals.count) * 100) : 0;
+  const rows = [...state.shopping]
+    .sort((a, b) => (a.bought === b.bought ? a.added.localeCompare(b.added) : Number(a.bought) - Number(b.bought)))
+    .map((item) => `<li class="shop-item${item.bought ? ' done' : ''}">
+      <label class="shop-check"><input type="checkbox" data-action="shop-toggle" data-id="${item.id}"${item.bought ? ' checked' : ''}>
+      <span class="shop-name">${escapeHtml(item.name)}</span></label>
+      <span class="chip">${escapeHtml(item.category)}</span>
+      <span class="amount">${formatRupiah(item.price)}</span>
+      <span class="shop-date">${formatDate(item.added)}</span>
+      <button class="btn-small danger-outline" data-action="delete-shopping" data-id="${item.id}" aria-label="Hapus ${escapeHtml(item.name)}">Hapus</button>
+    </li>`).join('');
+  const options = SHOPPING_CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join('');
+  return `
+  <h1>Rencana Belanja Mingguan</h1>
+  <p class="lede">Daftar belanja minggu ini (23–29 Nov 2026) untuk Keluarga Pratama. Centang barang yang sudah dibeli — total dan bilah kemajuan langsung mengikuti, dan daftar ini tersimpan di perangkat Anda.</p>
+  <section class="card planner-budget" aria-label="Anggaran belanja mingguan">
+    <h2>Anggaran Belanja Minggu Ini</h2>
+    <div class="projection-summary">
+      <div class="proj-stat"><span class="stat-label">Anggaran mingguan</span><strong class="stat-value">${formatRupiah(totals.budget)}</strong><span class="stat-note">dari anggaran Belanja Harian</span></div>
+      <div class="proj-stat"><span class="stat-label">Masih perlu dibeli</span><strong class="stat-value">${formatRupiah(totals.pendingTotal)}</strong><span class="stat-note">${totals.pendingCount} barang belum dibeli</span></div>
+      <div class="proj-stat"><span class="stat-label">Sisa anggaran</span><strong class="stat-value ${totals.over ? 'negative' : ''}">${formatRupiah(totals.remaining)}</strong><span class="stat-note">${totals.over ? 'daftar belanja melebihi anggaran — kurangi atau geser ke minggu depan' : 'cukup untuk daftar belanja minggu ini'}</span></div>
+    </div>
+    <div class="bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Kemajuan belanja mingguan"><div class="bar-fill" style="width:${pct}%"></div></div>
+    <p class="hint"><strong>${totals.boughtCount} dari ${totals.count} barang sudah dibeli</strong> (${pct}%) — sudah keluar ${formatRupiah(totals.boughtTotal)}.</p>
+  </section>
+  <section class="card" aria-label="Daftar belanja">
+    <h2>Daftar Belanja</h2>
+    <ul class="shop-list">${rows || '<li class="shop-empty">Daftar belanja kosong — tambah barang pertama di bawah.</li>'}</ul>
+    <h2 class="sub">Tambah Barang</h2>
+    <form id="add-shopping" class="form-grid">
+      <label>Nama barang <input name="name" required maxlength="60" placeholder="cth. Beras 5 kg"></label>
+      <label>Kategori <select name="category">${options}</select></label>
+      <label>Perkiraan harga (Rp) <input name="price" type="number" min="500" step="500" required placeholder="25000"></label>
+      <button class="btn primary" type="submit">+ Tambah ke Daftar</button>
+    </form>
+    <p class="hint" id="shopping-status" role="status"></p>
   </section>`;
 }

@@ -345,6 +345,19 @@ input:focus, select:focus { outline: 2px solid var(--teal); outline-offset: 1px;
 .table tfoot td { border-top: 2px solid var(--line); border-bottom: 0; }
 #csv-status { color: var(--green); font-weight: 600; }
 
+/* ---- Planner page ---- */
+
+.shop-list { list-style: none; margin: 0; padding: 0; }
+.shop-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.shop-item:last-child { border-bottom: 0; }
+.shop-item.done .shop-name { text-decoration: line-through; color: var(--muted); }
+.shop-check { display: flex; align-items: center; gap: 8px; flex: 1 1 220px; cursor: pointer; }
+.shop-check input { width: 18px; height: 18px; accent-color: var(--green); flex-shrink: 0; }
+.shop-name { font-weight: 600; }
+.shop-date { color: var(--muted); font-size: 13px; }
+.shop-empty { padding: 12px 0; color: var(--muted); }
+.planner-budget .bar { margin: 14px 0 6px; }
+
 /* ---- Phone layout ---- */
 
 @media (max-width: 860px) {
@@ -365,4 +378,8 @@ input:focus, select:focus { outline: 2px solid var(--teal); outline-offset: 1px;
   .goal-monthly { flex-direction: column; align-items: stretch; }
   .goal-monthly .hint { max-width: none; }
   #add-income .btn { justify-self: stretch; }
+  /* Daftar belanja menumpuk di layar kecil: nama barang jadi baris
+     sendiri, harga dan tombol hapus pindah ke baris bawah. */
+  .shop-item { gap: 6px 10px; }
+  .shop-check { flex-basis: 100%; }
 }
