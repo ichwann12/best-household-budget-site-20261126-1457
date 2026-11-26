@@ -137,6 +137,56 @@ function savingsRate(state) {
   return income > 0 ? (remaining(state) / income) * 100 : 0;
 }
 
+// ---- Proyeksi akhir bulan: dari belanja yang tercatat sampai hari ini. ----
+
+// November 2026 punya 30 hari. "Hari ini" untuk proyeksi adalah tanggal
+// pengeluaran terakhir yang tercatat (26 Nov pada data contoh), jadi
+// proyeksi selalu mengikuti catatan terbaru, bukan tanggal kalender.
+const DAYS_IN_MONTH = 30;
+
+function latestExpenseDay(state) {
+  let day = 1;
+  for (const expense of state.expenses) {
+    const d = Number(expense.date.slice(8, 10));
+    if (Number.isFinite(d) && d > day) day = d;
+  }
+  return day;
+}
+
+function daysLeftInMonth(state) {
+  return Math.max(0, DAYS_IN_MONTH - latestExpenseDay(state));
+}
+
+// Proyeksi tiap kategori ke akhir bulan: laju harian sejauh ini x 30 hari.
+function projectMonthEnd(state) {
+  const spent = spentByCategory(state);
+  const days = latestExpenseDay(state);
+  return state.categories.map((category) => {
+    const used = spent[category.id];
+    const projected = days > 0 ? (used / days) * DAYS_IN_MONTH : used;
+    return {
+      category,
+      spent: used,
+      budget: category.budget,
+      projected: Math.round(projected),
+      diff: Math.round(projected) - category.budget,
+    };
+  });
+}
+
+function projectedTotalSpent(state) {
+  return projectMonthEnd(state).reduce((sum, row) => sum + row.projected, 0);
+}
+
+// Sisa anggaran yang aman dibelanjakan per hari sampai akhir bulan:
+// (total anggaran - sudah dibelanjakan) / hari tersisa. Bisa negatif kalau
+// anggaran bulan ini sudah terlampaui — itu sinyal, bukan kesalahan hitung.
+function safeDailySpend(state) {
+  const left = daysLeftInMonth(state);
+  if (left <= 0) return totalBudget(state) - totalSpent(state);
+  return (totalBudget(state) - totalSpent(state)) / left;
+}
+
 function formatRupiah(amount) {
   return 'Rp ' + Math.round(amount).toLocaleString('id-ID');
 }
@@ -151,4 +201,44 @@ function formatDate(iso) {
   const [year, month, day] = iso.split('-').map(Number);
   const names = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
   return `${day} ${names[month - 1]} ${year}`;
+}
+
+// Perbandingan dengan bulan lalu (Oktober 2026, dari history): berapa
+// pengeluaran bulan ini dibanding bulan sebelumnya, dan selisihnya.
+function previousMonthComparison(state) {
+  const previous = state.history[state.history.length - 2];
+  if (!previous) return null;
+  const current = totalSpent(state);
+  return {
+    month: previous.month,
+    previousSpent: previous.spent,
+    currentSpent: current,
+    diff: current - previous.spent,
+    pct: previous.spent > 0 ? ((current - previous.spent) / previous.spent) * 100 : 0,
+  };
+}
+
+// Laju belanja harian tiap kategori sejauh ini — dipakai tabel proyeksi
+// supaya keluarga melihat berapa rupiah per hari yang "membakar" anggaran.
+function dailyPaceByCategory(state) {
+  const spent = spentByCategory(state);
+  const days = latestExpenseDay(state);
+  const pace = {};
+  for (const category of state.categories) {
+    pace[category.id] = days > 0 ? spent[category.id] / days : 0;
+  }
+  return pace;
+}
+// CSV export for the monthly report page: one row per expense, newest
+// first, notes quoted so commas and quotes inside a note stay intact.
+function buildExpensesCsv(state) {
+  const header = 'Tanggal,Catatan,Kategori,Jumlah (Rp)';
+  const lines = [...state.expenses]
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
+    .map((expense) => {
+      const category = state.categories.find((c) => c.id === expense.category);
+      const note = '"' + String(expense.note).replace(/"/g, '""') + '"';
+      return [expense.date, note, category ? category.name : expense.category, expense.amount].join(',');
+    });
+  return [header, ...lines].join('\n');
 }

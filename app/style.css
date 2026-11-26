@@ -290,17 +290,46 @@ input:focus, select:focus { outline: 2px solid var(--teal); outline-offset: 1px;
 .goal-pct { font-size: 13.5px; color: var(--muted); margin: 6px 0 12px; }
 .goal-deposit label { flex: 1; min-width: 170px; }
 
+/* ---- Projection panel (dashboard) ---- */
+
+.projection-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.proj-stat {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.proj-stat .stat-value { font-size: 20px; }
+.proj-stat .per-day { font-size: 13px; font-weight: 600; color: var(--muted); margin-left: 2px; }
+.projection-table td:first-child { white-space: nowrap; }
+.projection-table .dot { display: inline-block; vertical-align: -1px; margin-right: 2px; }
+
 /* ---- Trends ---- */
 
 .chart-wrap { display: flex; justify-content: center; overflow-x: auto; }
 .tips ul { margin: 0; padding-left: 20px; }
 .tips li { margin-bottom: 8px; }
 
+/* ---- Report page ---- */
+
+.table-scroll { overflow-x: auto; }
+.table-scroll .table { min-width: 560px; }
+.table tfoot td { border-top: 2px solid var(--line); border-bottom: 0; }
+#csv-status { color: var(--green); font-weight: 600; }
+
 /* ---- Phone layout ---- */
 
 @media (max-width: 860px) {
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
   .stats { grid-template-columns: repeat(2, 1fr); }
+  .projection-summary { grid-template-columns: 1fr; }
   .form-grid { grid-template-columns: 1fr; }
   .page { padding: 0 14px; }
   .site-header, .site-footer { padding-left: 14px; padding-right: 14px; }

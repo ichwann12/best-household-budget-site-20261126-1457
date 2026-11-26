@@ -8,6 +8,7 @@
 //   #/           dashboard      #/goals   savings goals
 //   #/expenses   expense log    #/trends  six-month trend
 //   #/budget     budget vs actual
+//   #/report     monthly report with CSV export
 //
 // window.__shotReady is false while a page renders and true once it is on
 // screen, so a screenshot script knows when to capture.
@@ -15,13 +16,14 @@
 const app = document.getElementById('app');
 let state = loadState();
 
-const NAV_ROUTES = { '#/': 1, '#/expenses': 1, '#/budget': 1, '#/goals': 1, '#/trends': 1 };
+const NAV_ROUTES = { '#/': 1, '#/expenses': 1, '#/budget': 1, '#/goals': 1, '#/trends': 1, '#/report': 1 };
 const TITLES = {
   '#/': 'Dasbor',
   '#/expenses': 'Catat Belanja',
   '#/budget': 'Anggaran vs Realisasi',
   '#/goals': 'Tabungan & Tujuan',
   '#/trends': 'Tren 6 Bulan',
+  '#/report': 'Laporan Bulanan',
 };
 
 function drawCharts(route) {
@@ -52,6 +54,7 @@ function render() {
     '#/budget': budgetPage,
     '#/goals': goalsPage,
     '#/trends': trendsPage,
+    '#/report': reportPage,
   };
   document.title = `${TITLES[route]} | Dompet Rumah`;
   app.innerHTML = nav(route) + pages[route](state);
@@ -171,6 +174,26 @@ function wirePage(route) {
       });
       saveState(state);
       render();
+    });
+  }
+
+  // Report page: the CSV is built in the browser from the live state and
+  // downloaded as a file — no network, nothing leaves the device.
+  const csvButton = document.getElementById('download-csv');
+  if (csvButton) {
+    csvButton.addEventListener('click', () => {
+      const csv = buildExpensesCsv(state);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'dompet-rumah-november-2026.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const status = document.getElementById('csv-status');
+      if (status) status.textContent = `✓ Berkas CSV dibuat — ${state.expenses.length} catatan, ${csv.split('\n').length} baris.`;
     });
   }
 }

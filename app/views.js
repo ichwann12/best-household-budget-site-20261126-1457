@@ -1,12 +1,13 @@
 // Dompet Rumah — the pages.
 //
-// Five hash pages, each one a real tool the household uses, reached from
+// Six hash pages, each one a real tool the household uses, reached from
 // the top navigation on every page:
-//   #/           Dashboard — the month at a glance
+//   #/           Dashboard — the month at a glance, with a month-end projection
 //   #/expenses   Catat Belanja — every expense line, with an add form
 //   #/budget     Anggaran — budget vs actual per category
 //   #/goals      Tabungan — savings goals with deposits
 //   #/trends     Tren — six months of income vs spending
+//   #/report     Laporan — monthly summary per category, with CSV export
 //
 // Every figure is rendered from the live state (see data.js), so a new
 // expense, a changed budget or a deposit redraws every page at once.
@@ -18,7 +19,39 @@ const NAV = [
   ['#/budget', 'Anggaran'],
   ['#/goals', 'Tabungan'],
   ['#/trends', 'Tren'],
+  ['#/report', 'Laporan'],
 ];
+
+function projectionPanel(state) {
+  const rows = projectMonthEnd(state);
+  const pace = dailyPaceByCategory(state);
+  const days = latestExpenseDay(state);
+  const left = daysLeftInMonth(state);
+  const safe = safeDailySpend(state);
+  const projectedTotal = projectedTotalSpent(state);
+  const budgetTotal = totalBudget(state);
+  const totalDiff = projectedTotal - budgetTotal;
+  const overCount = rows.filter((r) => r.diff > 0).length;
+  return `<section class="card projection" aria-label="Proyeksi akhir bulan">
+    <h2>Proyeksi Akhir Bulan</h2>
+    <p class="hint">Dihitung dari belanja 1–${days} Nov 2026: laju harian tiap kategori × 30 hari. Bukan ramalan — sekadar gambaran kalau pola belanja sekarang terus sampai akhir bulan.</p>
+    <div class="projection-summary">
+      <div class="proj-stat"><span class="stat-label">Sisa harian yang aman</span><strong class="stat-value ${safe < 0 ? 'negative' : ''}">${formatRupiah(safe)}<span class="per-day">/hari</span></strong><span class="stat-note">${left} hari tersisa di November</span></div>
+      <div class="proj-stat"><span class="stat-label">Proyeksi total belanja</span><strong class="stat-value">${formatRupiah(projectedTotal)}</strong><span class="stat-note">anggaran ${formatRupiah(budgetTotal)} · ${totalDiff > 0 ? 'lebih ' + formatRupiah(totalDiff) : 'di bawah ' + formatRupiah(-totalDiff)}</span></div>
+      <div class="proj-stat"><span class="stat-label">Kategori berisiko lewat</span><strong class="stat-value">${overCount} dari ${rows.length}</strong><span class="stat-note">proyeksi melebihi anggaran</span></div>
+    </div>
+    <div class="table-scroll"><table class="table projection-table"><thead><tr><th>Kategori</th><th>Realisasi</th><th>Laju/hari</th><th>Proyeksi 30 Nov</th><th>Anggaran</th><th>Selisih</th></tr></thead>
+    <tbody>${rows.map((r) => `<tr>
+      <td><span class="dot" style="background:${r.category.color}"></span> ${r.category.name}</td>
+      <td class="amount">${formatRupiah(r.spent)}</td>
+      <td class="amount">${formatRupiah(pace[r.category.id])}</td>
+      <td class="amount">${formatRupiah(r.projected)}</td>
+      <td class="amount">${formatRupiah(r.budget)}</td>
+      <td class="amount ${r.diff > 0 ? 'negative' : 'positive'}">${r.diff > 0 ? '+' : ''}${formatRupiah(r.diff)}</td>
+    </tr>`).join('')}</tbody></table></div>
+    <p class="hint">Catatan: Sewa rumah dibayar lunas tanggal 1, jadi proyeksi Rumah &amp; Sewa terlihat tinggi — itu biaya tetap yang sudah selesai, bukan belanja harian yang masih berjalan.</p>
+  </section>`;
+}
 
 function nav(active) {
   return `<nav class="nav" aria-label="Navigasi utama">${NAV.map(([href, label]) =>
@@ -67,6 +100,7 @@ function dashboard(state) {
   <p class="lede">Uang masuk, uang keluar, dan sisa untuk ditabung — dihitung dari catatan belanja keluarga.</p>
   ${statCards(state)}
   ${over.length ? `<p class="alert">⚠ Lewat anggaran: ${over.map((c) => `${c.name} (${formatRupiah(spent[c.id] - c.budget)} di atas batas)`).join(', ')}. Lihat <a href="#/budget">halaman Anggaran</a> untuk menyesuaikan.</p>` : ''}
+  ${projectionPanel(state)}
   <div class="grid-2">
     <section class="card">
       <h2>Belanja per Kategori</h2>
@@ -185,6 +219,55 @@ function goalsPage(state) {
       <button class="btn primary" type="submit">Buat Tujuan</button>
     </form>
     <p class="hint">Sisa uang bulan ini ${formatRupiah(remaining(state))} — cukup untuk menambah tabungan tanpa mengganggu anggaran.</p>
+  </section>`;
+}
+
+function reportPage(state) {
+  const spent = spentByCategory(state);
+  const income = totalIncome(state);
+  const out = totalSpent(state);
+  const left = remaining(state);
+  const savedTotal = state.goals.reduce((sum, g) => sum + g.saved, 0);
+  const rows = state.categories.map((category) => {
+    const used = spent[category.id];
+    const pct = category.budget > 0 ? (used / category.budget) * 100 : 0;
+    const diff = used - category.budget;
+    return `<tr>
+      <td><span class="dot" style="background:${category.color}"></span> ${category.name}</td>
+      <td class="amount">${formatRupiah(category.budget)}</td>
+      <td class="amount">${formatRupiah(used)}</td>
+      <td class="amount ${diff > 0 ? 'negative' : 'positive'}">${diff > 0 ? '+' : ''}${formatRupiah(diff)}</td>
+      <td class="amount">${pct.toFixed(0)}%</td>
+    </tr>`;
+  }).join('');
+  const totalPct = totalBudget(state) > 0 ? (out / totalBudget(state)) * 100 : 0;
+  const compare = previousMonthComparison(state);
+  const compareBlock = compare ? `
+  <section class="card">
+    <h2>Dibanding ${compare.month}</h2>
+    <p>Bulan lalu keluarga menghabiskan <strong>${formatRupiah(compare.previousSpent)}</strong>; bulan ini sejauh ini <strong>${formatRupiah(compare.currentSpent)}</strong> — ${compare.diff <= 0 ? 'lebih hemat ' + formatRupiah(-compare.diff) : 'lebih boros ' + formatRupiah(compare.diff)} (${compare.pct.toFixed(1).replace('.', ',')}% dibanding bulan lalu). Sisa ${daysLeftInMonth(state)} hari lagi: menjaga laju di bawah ${formatRupiah(safeDailySpend(state))} per hari membuat bulan ini berakhir di bawah anggaran.</p>
+  </section>` : '';
+  return `
+  <h1>Laporan Bulanan — ${MONTH_LABEL}</h1>
+  <p class="lede">Ringkasan lengkap bulan ini untuk ${HOUSEHOLD_NAME}: pemasukan, pengeluaran per kategori, dan sisa untuk ditabung. Unduh catatan belanjanya sebagai CSV untuk arsip atau diolah di spreadsheet.</p>
+  <section class="stats" aria-label="Ringkasan bulanan">
+    <div class="stat"><span class="stat-label">Pemasukan</span><strong class="stat-value">${formatRupiah(income)}</strong><span class="stat-note">Gaji + katering</span></div>
+    <div class="stat"><span class="stat-label">Pengeluaran</span><strong class="stat-value">${formatRupiah(out)}</strong><span class="stat-note">${state.expenses.length} catatan · ${totalPct.toFixed(0)}% dari anggaran</span></div>
+    <div class="stat ${left < 0 ? 'danger' : ''}"><span class="stat-label">Sisa Uang</span><strong class="stat-value">${formatRupiah(left)}</strong><span class="stat-note">tersedia untuk ditabung</span></div>
+    <div class="stat"><span class="stat-label">Total Tabungan</span><strong class="stat-value">${formatRupiah(savedTotal)}</strong><span class="stat-note">${state.goals.length} tujuan aktif</span></div>
+  </section>
+  <section class="card">
+    <h2>Per Kategori — Anggaran vs Realisasi</h2>
+    <div class="table-scroll"><table class="table"><thead><tr><th>Kategori</th><th>Anggaran</th><th>Realisasi</th><th>Selisih</th><th>% Anggaran</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td><strong>Total</strong></td><td class="amount"><strong>${formatRupiah(totalBudget(state))}</strong></td><td class="amount"><strong>${formatRupiah(out)}</strong></td><td class="amount"><strong>${formatRupiah(out - totalBudget(state))}</strong></td><td class="amount"><strong>${totalPct.toFixed(0)}%</strong></td></tr></tfoot></table></div>
+  </section>
+  ${compareBlock}
+  <section class="card">
+    <h2>Unduh Catatan Belanja</h2>
+    <p>Seluruh ${state.expenses.length} baris pengeluaran bulan ini — tanggal, catatan, kategori, dan jumlah — dalam satu berkas CSV yang bisa dibuka di spreadsheet mana pun. Berkas dibuat langsung di perangkat Anda, tanpa mengunggah apa pun.</p>
+    <p><button class="btn primary" id="download-csv" type="button">⬇ Unduh CSV (${state.expenses.length} catatan)</button></p>
+    <p class="hint" id="csv-status" role="status"></p>
   </section>`;
 }
 
